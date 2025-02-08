@@ -1,3 +1,6 @@
+
+mod canvas;
+
 use eframe::egui;
 
 use egui::{
@@ -11,8 +14,9 @@ use egui::{
     TextureOptions,
 };
 
-use std::sync::{Arc, RwLock};
+use canvas::Canvas;
 
+use std::sync::{Arc, RwLock};
 
 
 fn main() -> Result<(), eframe::Error> {
@@ -32,7 +36,7 @@ fn main() -> Result<(), eframe::Error> {
 struct MyApp {
     outputs: Arc<RwLock<[f32; 10]>>,
     drawing_texture: Option<TextureHandle>,
-    drawing_data: Arc<RwLock<Vec<Color32>>>,
+    drawing_data: Arc<RwLock<Canvas>>,
     prev_brush_pos: Option<Vec2>,
 }
 
@@ -43,17 +47,17 @@ impl MyApp {
         Self {
             outputs: Arc::new(RwLock::new([0.0; 10])),
             drawing_texture: None,
-            drawing_data: Arc::new(RwLock::new(drawing_data)),
+            drawing_data: Arc::new(RwLock::new(Canvas::new(Color32::WHITE, Color32::BLACK, [28, 28]))),
             prev_brush_pos: None,
         }
     }
 
     fn update_drawing(&mut self, ctx: &egui::Context) {
-        let pixels = self.drawing_data.write().unwrap();
+        let canvas = self.drawing_data.write().unwrap();
 
         let img_data = ImageData::Color(Arc::new(ColorImage {
             size: [28,28],
-            pixels: pixels.clone()
+            pixels: canvas.get_pixels()
         }));
 
         if let Some(texture) = &mut self.drawing_texture {
@@ -83,7 +87,7 @@ impl eframe::App for MyApp {
                         .desired_width(100.0)
                         .desired_height(50.0)
                         .text(n.to_string())
-                        .rounding(egui::Rounding::same(6.0)));
+                        .rounding(egui::Rounding::same(2)));
                 }
             });
         });
@@ -110,24 +114,58 @@ impl eframe::App for MyApp {
 
                             //println!("{:?}",&self.drawing_data);
                             //
-                            println!("{}, {}; {}, {}",
-                                uv.x,
-                                uv.y,
-                                self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).x,
-                                self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).y
-                            );
+                            //println!("{}, {}; {}, {}",
+                            //    uv.x,
+                            //    uv.y,
+                            //    self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).x,
+                            //    self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).y
+                            //);
 
 
-                            let img = &mut self.drawing_data.write().unwrap();
+                            //let img = &mut self.drawing_data.write().unwrap();
                             //println!("{:?}",img);
-                            img[(rounded.x as usize) + 28 * ((rounded.y  as usize))] = Color32::BLACK;
+                            //img[(rounded.x as usize) + 28 * ((rounded.y  as usize))] = Color32::BLACK;
+                            let canvas = &mut self.drawing_data.write().unwrap();
+
+                            match self.prev_brush_pos {
+                                Some(prev_pos) => {
+                                    if let Err(e) = canvas.draw_line(prev_pos, uv) {
+                                        panic!("Error: {:?}", e);
+                                    }
+                                },
+                                None => {
+                                    if let Err(e) = canvas.draw_point(uv) {
+                                        panic!("Error: {:?}", e);
+                                    }
+                                }   
+                            }
                             self.prev_brush_pos = Some(uv.clone());
                         }
                     } else {
                         // mouse is not clicked; break brush line.
                         self.prev_brush_pos = None;
                     }
+                } else {
+                    // mouse is not on drawing area; break brush line.
+                    self.prev_brush_pos = None;
                 }
+
+                let canvas = &mut self.drawing_data.write().unwrap();
+
+                ui.add(egui::Slider::new(&mut canvas.brush_size, 1.01..=10.0)
+                    .clamping(egui::SliderClamping::Edits)
+                    .text("Brush Size")
+                );
+
+                ui.add(egui::Slider::new(&mut canvas.brush_smoothness, 0.0..=75.0)
+                    .clamping(egui::SliderClamping::Edits)
+                    .text("Brush Smoothness")
+                );
+
+                ui.add(egui::Slider::new(&mut canvas.brush_intensity, 0.5..=15.0)
+                    .clamping(egui::SliderClamping::Edits)
+                    .text("Brush Intensity")
+                );
 
             });
         });
