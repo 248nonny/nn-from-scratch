@@ -93,7 +93,6 @@ impl Canvas {
     }
     
     pub fn draw_line(&mut self, start: Vec2, end: Vec2) -> Result<(), CanvasError> {
-        println!("start: {}, end: {}", start, end);
         if let Err(e) = self.check_point_bounds(start) {
             return Err(e);
         }
