@@ -42,29 +42,6 @@ fn test_dot_product() {
     assert!((dot(&vecs[0][0..2], &vecs[1][0..2]).unwrap() - 0.3).abs() < tolerance);
 }
 
-#[test]
-fn test_outer_product() {
-    let v1 = vec![1.0, 2.0, 3.4];
-    let v2 = vec![0.5, 0.2, 0.1, 5.3];
-
-    let correct_output = vec![
-        0.5, 0.2,  0.1,  5.3,
-        1.0, 0.4,  0.2,  10.6,
-        1.7, 0.68, 0.34, 18.02
-    ];
-
-    let outer = outer_product(&v1, &v2);
-    let output = outer.get_raw_values();
-
-    for i in 0..correct_output.len() {
-        assert!(correct_output[i] == output[i]);
-    }
-
-    let outer2 = outer_product(&v2, &v1);
-
-    assert!(outer == outer2.to_transpose());
-
-}
 
 
 
@@ -433,4 +410,28 @@ fn test_generated_matrices() {
             assert!(compare_equal_f(*val, expected));
         }
     }
+}
+
+#[test]
+fn test_matrix_addition_substraction_scalar_multiplication() {
+    let out = &generate_matrix(2, 3, 0.0) + &generate_matrix(2, 3, 6.0);
+    
+    let expected = Matrix::from_values(vec![
+        6.0, 8.0, 10.0, 12.0, 14.0, 16.0
+    ], 2, 3);
+
+    assert!(out == expected);
+
+    let mut out = &generate_matrix(2, 3, 0.0) - &generate_matrix(2, 3, 6.0);
+
+
+    let expected = Matrix::from_values(vec![-6.0;6], 2, 3);
+
+    assert!(out == expected);
+
+    out = &out * 5.0;
+    
+    let expected = Matrix::from_values(vec![-30.0;6], 2, 3);
+
+    assert!(out == expected);
 }

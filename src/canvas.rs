@@ -17,7 +17,6 @@ pub struct Canvas {
 
 #[derive(Debug)]
 pub enum BrushType {
-    Hard,
     Smooth,
 }
 
@@ -44,20 +43,20 @@ impl Canvas {
         }
     }
 
-    pub fn set_brush_type(&mut self, brush_type: BrushType) {
-        self.brush_type = brush_type;
-    }
-
-    pub fn set_brush_size(&mut self, brush_size: f32) {
-        self.brush_size = brush_size;
-    }
-
     pub fn fill(&mut self, val: Color32) {
         self.pixels.fill(val);
     }
 
+    pub fn clear(&mut self) {
+        self.fill(self.blank_color);
+    }
+
     pub fn get_pixels(&self) -> Vec<Color32> {
         self.pixels.clone()
+    }
+
+    pub fn get_pixels_as_slice(&self) -> &[Color32] {
+        &self.pixels[..]
     }
 
     pub fn draw_point(&mut self, point: Vec2) -> Result<(), CanvasError> {
@@ -88,7 +87,6 @@ impl Canvas {
                 }
                 Ok(())
             },
-            _ => Ok(()),
         }
     }
     
@@ -205,7 +203,7 @@ impl Iterator for PointPxIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.loc = Some(self.next_point(self.loc));
-        for i in 0..3 {
+        for _i in 0..3 {
             let d2 = self.d2();
             if d2 < self.radius2 {
                 return Some(PxWithD {px: self.loc.unwrap(), d2});

@@ -1,6 +1,6 @@
 
 use std::iter::zip;
-use std::ops::{Mul, MulAssign};
+use std::ops::{Mul, MulAssign, Add, Sub};
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 
@@ -221,6 +221,10 @@ impl Matrix {
         &self.values[self.n * i..self.n * (i + 1)]
     }
 
+    pub fn get_mut_row_slice(&mut self, i: usize) -> &mut [F] {
+        &mut self.values[self.n * i..self.n * (i + 1)]
+    }
+
     pub fn get_col(&self, j: usize) -> Vec<F> {
         (0..self.m).map(|i| self.values[j + i * self.n]).collect()
     }
@@ -283,6 +287,53 @@ impl Mul<&Matrix> for &Matrix {
     }
 }
 
+
+impl Sub<&Matrix> for &Matrix {
+    type Output = Matrix;
+
+    fn sub(self, rhs: &Matrix) -> Matrix {
+        if self.m != rhs.m || self.n != rhs.n {
+            panic!("Dimensinon mismatch when trying to multiply matrices!");
+        }
+
+        let mut values = Vec::new();
+        values.reserve_exact(self.values.len());
+
+        for (e1, e2) in zip(self.values.iter(), rhs.values.iter()) {
+            values.push(e1 - e2);
+        }
+
+        Matrix {
+            values,
+            m: self.m,
+            n: self.n,
+        }
+    }
+}
+
+impl Add<&Matrix> for &Matrix {
+    type Output = Matrix;
+
+    fn add(self, rhs: &Matrix) -> Matrix {
+        if self.m != rhs.m || self.n != rhs.n {
+            panic!("Dimensinon mismatch when trying to multiply matrices!");
+        }
+
+        let mut values = Vec::new();
+        values.reserve_exact(self.values.len());
+
+        for (e1, e2) in zip(self.values.iter(), rhs.values.iter()) {
+            values.push(e1 + e2);
+        }
+
+        Matrix {
+            values,
+            m: self.m,
+            n: self.n,
+        }
+    }
+}
+
 impl<T: Vector<F>> Mul<&T> for &Matrix {
     type Output = Vec<F>;
 
@@ -295,6 +346,18 @@ impl<T: Vector<F>> Mul<&T> for &Matrix {
         }
 
         output
+    }
+}
+
+impl Mul<F> for &Matrix {
+    type Output = Matrix;
+
+    fn mul(self, rhs: F) -> Matrix {
+        Matrix {
+            values: self.values.iter().map(|x| x * rhs).collect(),
+            m: self.m,
+            n: self.n,
+        }
     }
 }
 
@@ -354,7 +417,6 @@ pub fn dot<U, V>(u: &U, v: &V) -> Option<F>
 where V: Vector<F> + ?Sized,
       U: Vector<F> + ?Sized, {
 
-    println!("dot between {:?} and {:?}.", u, v);
     if u.size() != v.size() {
         return None;
     }
@@ -367,29 +429,4 @@ where V: Vector<F> + ?Sized,
 
     Some(sum)
 }
-
-pub fn outer_product<U, V>(u: &U, v: &V) -> Matrix
-where V: Vector<F> + ?Sized,
-      U: Vector<F> + ?Sized,
-{ 
-    let mut values = Vec::new();
-    values.reserve_exact(u.size() * v.size());
-
-    for (i, val) in u.elements().enumerate() {
-        values.extend(v.elements().map(|x| x * val));
-    }
-
-    Matrix {
-        values,
-        n: v.size(),
-        m: u.size(),
-    }
-}
-
-
-
-
-
-
-
 

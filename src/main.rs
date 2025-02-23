@@ -19,18 +19,16 @@ use egui::{
 };
 
 use canvas::Canvas;
+use neural_net::{ NeuralNet, NNData };
 
 use std::sync::{Arc, RwLock};
-
+use std::sync::mpsc::{self, TryRecvError, Sender};
+use std::thread;
+use std::iter::zip;
 
 fn main() -> Result<(), eframe::Error> {
     println!("Hello, World!");
 
-    let mut nn = neural_net::NeuralNet::new(vec![28 * 28, 5, 5, 10]);
-
-    nn.populate_random_weights();
-
-    let outputs = Arc::new(RwLock::new([0.0; 10]));
 
     let options = eframe::NativeOptions::default();
 
@@ -48,13 +46,18 @@ enum View {
 }
 
 struct MyApp {
-    outputs: Arc<RwLock<[f32; 10]>>,
+    ctx: Arc<egui::Context>,
+
+    outputs: [f32; 10],
     drawing_texture: Option<TextureHandle>,
 
     data_view_texture: Option<TextureHandle>,
     data_view_index: usize,
-    training_images: Vec<Vec<u8>>,
-    training_labels: Vec<u8>,
+    training_data: Arc<Vec<neural_net::NNData>>,
+    error_data: Arc<RwLock<Vec<f32>>>,
+    nn: Arc<RwLock<NeuralNet>>,
+    learning_rate: f32,
+    training_thread_tx: Option<Sender<bool>>,
 
     drawing_data: Arc<RwLock<Canvas>>,
     prev_brush_pos: Option<Vec2>,
@@ -62,19 +65,35 @@ struct MyApp {
 }
 
 impl MyApp {
-    fn new(__cc: &eframe::CreationContext<'_>) -> Self {
-        let drawing_data = vec![Color32::WHITE; 28 * 28];
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let error_data = Arc::new(RwLock::new(Vec::new()));
+
+        let ctx = Arc::new(cc.egui_ctx.clone());
 
         let (training_images, training_labels) = data_reader::get_mnist_images("./data/train-images.idx3-ubyte", "./data/train-labels.idx1-ubyte").unwrap();
+
+
+        let mut nn = NeuralNet::new();
+
+        nn.populate_random_weights();
+
+        let training_data = Arc::new(zip(training_images, training_labels)
+            .map(|(data, label)| NNData { data, label: label as usize }).collect());
     
         Self {
-            outputs: Arc::new(RwLock::new([0.0; 10])),
+            ctx,
+
+            outputs: [0.0; 10],
             drawing_texture: None,
 
             data_view_texture: None,
             data_view_index: 0,
-            training_images,
-            training_labels,
+            training_data,
+            error_data,
+            nn: Arc::new(RwLock::new(nn)),
+            learning_rate: 0.1,
+            training_thread_tx: None,
+            
 
             drawing_data: Arc::new(RwLock::new(Canvas::new(Color32::WHITE, Color32::BLACK, [28, 28]))),
 
@@ -116,14 +135,13 @@ impl eframe::App for MyApp {
             .show(ctx, |ui| {
 
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 10.0);
-            let output_values = *self.outputs.read().unwrap();
             ui.vertical_centered_justified(|ui| {
-                for n in 0..9 {
-                    ui.add(widgets::ProgressBar::new(output_values[n])
+                for n in 0..10 {
+                    ui.add(widgets::ProgressBar::new(self.outputs[n])
                         .desired_width(100.0)
                         .desired_height(50.0)
                         .text(n.to_string())
-                        .rounding(egui::Rounding::same(2)));
+                        .corner_radius(egui::CornerRadius::same(2)));
                 }
             });
         });
@@ -147,20 +165,104 @@ impl eframe::App for MyApp {
 
             match self.view {
                 View::Train => {
-                    let sin: PlotPoints = (0..1000).map(|i| {
-                        let x = i as f64 * 0.01;
-                        [x, x.sin()]
-                    }).collect();
+                    //let sin: PlotPoints = (0..1000).map(|i| {
+                    //    let x = i as f64 * 0.01;
+                    //    [x, x.sin()]
+                    //}).collect();
 
-                    let line = Line::new(sin);
+                    //let line = Line::new(sin);
+
+                    let line;
+                    {
+                        loop {
+                            //if let Some(tx) = self.training_thread_tx.as_ref() {
+                            //    if let Ok(_) = tx.send(true) {
+                            //        thread::sleep(Duration::from_millis(3));
+                            //    }
+                            //}
+                                    
+
+                            let mut i = 0;
+                            if let Ok(data_with_lock) = self.error_data.try_read() {
+
+                                let error_points: PlotPoints = data_with_lock.iter()
+                                    .map(|y| {
+                                        let out = [i as f64, *y as f64];
+                                        i += 1;
+                                        out
+                                    })
+                                    .collect();
+                                line = Line::new(error_points);
+                                break;
+                            }
+                        }
+                    }
+                    
                     Plot::new("test_plot").view_aspect(2.0).show(ui, |plot_ui| plot_ui.line(line));
+
+                    if ui.button("Start Training").clicked() {
+                        let (tx, rx) = mpsc::channel();
+
+                        self.training_thread_tx = Some(tx);
+
+                        let nn = Arc::clone(&self.nn);
+                        let training_data = Arc::clone(&self.training_data);
+                        let p_points = Arc::clone(&self.error_data);
+
+                        let ctx_arc = Arc::clone(&self.ctx);
+
+                        let _training_thread = thread::spawn(move || {
+                            let mut count = 0;
+                            let mut vals = Vec::new();
+                            vals.reserve(50);
+                            loop {
+                                count += 1;
+                                if count % 200 == 0 {
+                                    match rx.try_recv() {
+                                        //Ok(B) if B => thread::sleep(Duration::from_millis(10)),
+                                        Ok(_) | Err(TryRecvError::Disconnected) => {
+                                            println!("stopping indefinite training thread.");
+                                            break;
+                                        }
+                                        Err(TryRecvError::Empty) => {}
+                                    }
+
+                                    p_points.write().unwrap().extend_from_slice(&vals[..]);
+                                    vals.clear();
+                                    ctx_arc.request_repaint();
+                                }
+                                
+                                vals.push(nn.write().unwrap().train_one(&training_data[rand::random_range(0..training_data.len())]));
+                            }
+                        });
+                    }
+
+                    if ui.button("Stop Training").clicked() {
+
+                        if let Some(tx) = self.training_thread_tx.as_ref() {
+                            tx.send(false);
+                        }
+
+                        self.training_thread_tx = None;
+                    }
+
+                    let response = ui.add(egui::Slider::new(&mut self.learning_rate, 0.0001..=0.4)
+                        .clamping(egui::SliderClamping::Edits)
+                        .text("Learning Rate")
+                    );
+
+                    if let Ok(mut nn) = self.nn.try_write() {
+                        nn.set_learning_rate(self.learning_rate);
+                    }
+
+
                 },
                 
                 View::InspectData => {
                     
 
                     ui.vertical_centered(|ui| {
-                        let pixels: Vec<Color32> = self.training_images[self.data_view_index].iter()
+                        let pixels: Vec<Color32> = self.training_data[self.data_view_index].data.iter()
                             .map(|&x| Color32::from_gray(255 - x))
                             .collect();
 
@@ -182,10 +284,10 @@ impl eframe::App for MyApp {
                                 .maintain_aspect_ratio(true).fit_to_fraction([0.8,0.8].into()));
 
                         ui.label(egui::widget_text::RichText::new(
-                                format!("{}", self.training_labels[self.data_view_index]))
+                                format!("{}", self.training_data[self.data_view_index].label))
                             .size(20.0));
 
-                        ui.add(egui::Slider::new(&mut self.data_view_index, 0..=self.training_images.len() - 1)
+                        ui.add(egui::Slider::new(&mut self.data_view_index, 0..=self.training_data.len() - 1)
                             .clamping(egui::SliderClamping::Edits)
                             .text("Image ID")
                         );
@@ -198,7 +300,7 @@ impl eframe::App for MyApp {
                             }
 
                             if ui.button(">").clicked() {
-                                if self.data_view_index < self.training_images.len() - 1 {
+                                if self.data_view_index < self.training_data.len() - 1 {
                                     self.data_view_index += 1;
                                 }
                             }
@@ -214,7 +316,7 @@ impl eframe::App for MyApp {
                         ui.label("Hello World!");
                         if ui.button("Clear").clicked() {
                             let img = &mut self.drawing_data.write().unwrap();
-                            img.fill(Color32::WHITE);
+                            img.clear();
                         }
 
                         let response = ui.add(widgets::Image::from_texture(
@@ -227,21 +329,7 @@ impl eframe::App for MyApp {
                                     let min = response.rect.min;
                                     let max = response.rect.max;
                                     let uv = 28.0 * (mouse_pos - min) / (max - min);
-                                    let mut rounded = uv.floor();
 
-                                    //println!("{:?}",&self.drawing_data);
-                                    //
-                                    //println!("{}, {}; {}, {}",
-                                    //    uv.x,
-                                    //    uv.y,
-                                    //    self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).x,
-                                    //    self.prev_brush_pos.unwrap_or_else(|| vec2(-1.0,-1.0)).y
-                                    //);
-
-
-                                    //let img = &mut self.drawing_data.write().unwrap();
-                                    //println!("{:?}",img);
-                                    //img[(rounded.x as usize) + 28 * ((rounded.y  as usize))] = Color32::BLACK;
                                     let canvas = &mut self.drawing_data.write().unwrap();
 
                                     match self.prev_brush_pos {
@@ -257,6 +345,25 @@ impl eframe::App for MyApp {
                                         }   
                                     }
                                     self.prev_brush_pos = Some(uv.clone());
+
+                                    let prediction = self.nn.read().unwrap()
+                                        .image_to_prediction(
+                                            neural_net::scale_and_normalize_data(
+                                                &canvas.get_pixels_as_slice()
+                                                .iter()
+                                                .map(|color|
+                                                    ((
+                                                        color.r() as f32 +
+                                                        color.g() as f32 +
+                                                        color.b() as f32
+                                                    ) / (3.0)) as u8
+                                                ).collect::<Vec<u8>>()
+                                            )
+                                        );
+
+                                    for i in 0..10 {
+                                        self.outputs[i] = prediction[i];
+                                    }
                                 }
                             } else {
                                 // mouse is not clicked; break brush line.
@@ -266,6 +373,17 @@ impl eframe::App for MyApp {
                             // mouse is not on drawing area; break brush line.
                             self.prev_brush_pos = None;
                         }
+
+                        let mut max = -1.0;
+                        let mut final_prediction = 0;
+                        for i in 0..10 {
+                            if self.outputs[i] > max {
+                                max = self.outputs[i];
+                                final_prediction = i;
+                            }
+                        }
+
+                        ui.label(final_prediction.to_string());
 
                         let canvas = &mut self.drawing_data.write().unwrap();
 
