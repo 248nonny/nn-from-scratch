@@ -101,7 +101,7 @@ impl Canvas {
         let line_length = (end - start).length();
         
         if line_length < 0.001 {
-            self.draw_point(start);
+            let _ = self.draw_point(start);
             return Ok(());
         }
 
@@ -111,7 +111,7 @@ impl Canvas {
 
         pos += grad;
         loop {
-            self.draw_point(pos);
+            let _ = self.draw_point(pos);
 
             if (pos.x - start.x).abs() >= (line_length * grad.x).abs() {
                 return Ok(());

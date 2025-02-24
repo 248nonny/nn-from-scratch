@@ -28,7 +28,7 @@ impl NeuralNet {
         // the structure of the network for the MNIST dataset; input layer
         // can take in an image, middle layer for processing, output layer has
         // one node per possible label.
-        let net_structure = vec![28 * 28, 100, 10];
+        let net_structure = vec![28 * 28, 160, 10];
 
         let mut weights: Vec<Matrix> = Vec::new();
 

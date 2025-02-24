@@ -54,10 +54,11 @@ struct MyApp {
     data_view_texture: Option<TextureHandle>,
     data_view_index: usize,
     training_data: Arc<Vec<neural_net::NNData>>,
+    //testing_data: Arc<Vec<neural_net::NNData>>,
     error_data: Arc<RwLock<Vec<f32>>>,
     nn: Arc<RwLock<NeuralNet>>,
     learning_rate: f32,
-    training_thread_tx: Option<Sender<bool>>,
+    training_thread_tx: Option<Sender<()>>,
 
     drawing_data: Arc<RwLock<Canvas>>,
     prev_brush_pos: Option<Vec2>,
@@ -70,8 +71,10 @@ impl MyApp {
 
         let ctx = Arc::new(cc.egui_ctx.clone());
 
+
         let (training_images, training_labels) = data_reader::get_mnist_images("./data/train-images.idx3-ubyte", "./data/train-labels.idx1-ubyte").unwrap();
 
+        //let (testing_images, testing_labels) = data_reader::get_mnist_images("./data/t10k-images.idx3-ubyte", "./data/t10k-labels.idx1-ubyte").unwrap();
 
         let mut nn = NeuralNet::new();
 
@@ -79,6 +82,9 @@ impl MyApp {
 
         let training_data = Arc::new(zip(training_images, training_labels)
             .map(|(data, label)| NNData { data, label: label as usize }).collect());
+
+        //let testing_data = Arc::new(zip(testing_images, testing_labels)
+        //    .map(|(data, label)| NNData { data, label: label as usize }).collect());
     
         Self {
             ctx,
@@ -89,6 +95,7 @@ impl MyApp {
             data_view_texture: None,
             data_view_index: 0,
             training_data,
+            //testing_data,
             error_data,
             nn: Arc::new(RwLock::new(nn)),
             learning_rate: 0.1,
@@ -240,13 +247,13 @@ impl eframe::App for MyApp {
                     if ui.button("Stop Training").clicked() {
 
                         if let Some(tx) = self.training_thread_tx.as_ref() {
-                            tx.send(false);
+                            let _ = tx.send(());
                         }
 
                         self.training_thread_tx = None;
                     }
 
-                    let response = ui.add(egui::Slider::new(&mut self.learning_rate, 0.0001..=0.4)
+                    ui.add(egui::Slider::new(&mut self.learning_rate, 0.0001..=0.4)
                         .clamping(egui::SliderClamping::Edits)
                         .text("Learning Rate")
                     );
@@ -346,13 +353,13 @@ impl eframe::App for MyApp {
                                     }
                                     self.prev_brush_pos = Some(uv.clone());
 
-                                    let prediction = self.nn.read().unwrap()
-                                        .image_to_prediction(
+                                    if let Ok(nn) = self.nn.try_read() {
+                                        let prediction = nn.image_to_prediction(
                                             neural_net::scale_and_normalize_data(
                                                 &canvas.get_pixels_as_slice()
                                                 .iter()
                                                 .map(|color|
-                                                    ((
+                                                    (255.0 - (
                                                         color.r() as f32 +
                                                         color.g() as f32 +
                                                         color.b() as f32
@@ -361,9 +368,11 @@ impl eframe::App for MyApp {
                                             )
                                         );
 
-                                    for i in 0..10 {
-                                        self.outputs[i] = prediction[i];
+                                        for i in 0..10 {
+                                            self.outputs[i] = prediction[i];
+                                        }
                                     }
+
                                 }
                             } else {
                                 // mouse is not clicked; break brush line.
